@@ -1,0 +1,15 @@
+# Callback A example
+#- type: custom
+#  token: actual-token-or-token-name
+#  url: https://url.to.your.listener/with/path/or/not
+#  dataset: minimal|logs|results|all
+#  method: POST|GET
+#  content-type: json|urlencoded
+
+# Callback B example with template fields
+#- type: custom
+#  token: actual-token-or-token-name
+#  url: https://url.to.your.listener?id={ID}&status={STATUS}&status_string={STATUS_STRING}
+#  dataset: minimal|logs|results|all
+#  method: POST|GET
+#  content-type: json|urlencoded

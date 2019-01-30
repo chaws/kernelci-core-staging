@@ -39,21 +39,29 @@ context:
 {% endfor %}
 {% endif %}
 
-{%- if callback %}
+{%- if callbacks %}
 notify:
   criteria:
     status: finished
-  callback:
-{%- if callback_type == 'custom' %}
-    url: {{ callback_url }}
+  callbacks:
+{%- for callback in callbacks %}
+{%- if callback['type'] == 'custom' %}
+    - url: {{ callback['url'] }}
+      imethod: {{ callback['method'] }}
+      dataset: {{ callback['dataset'] }}
+      {%- if callback['token'] %}
+      token: {{ callback['token'] }}
+      {%- endif %}
+      content-type: {{ callback['content-type'] }}
 {%- else %}
-    url: {{ callback_url }}/callback/{{ callback_name }}?lab_name={{ lab_name }}&status={STATUS}&status_string={STATUS_STRING}
+    - url: {{ callback['url'] }}/callback/{{ callback['name'] }}?lab_name={{ lab_name }}&status={STATUS}&status_string={STATUS_STRING}
+      method: POST
+      dataset: {{ callback['dataset'] }}
+      token: {{ callback['token'] }}
+      content-type: json
 {%- endif %}
-    method: POST
-    dataset: {{ callback_dataset }}
-    token: {{ callback }}
-    content-type: json
-{% endif %}
+{%- endfor %}
+{%- endif %}
 
 job_name: {{ name }}
 timeouts:

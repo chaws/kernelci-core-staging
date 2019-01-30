@@ -23,6 +23,7 @@
 import argparse
 from jinja2 import Environment, FileSystemLoader
 import json
+import yaml
 import os
 import requests
 import time
@@ -71,23 +72,79 @@ def get_builds(api, token, config):
     return builds
 
 
+def is_callbacks_file_valid(callbacks):
+    expected_fields = ['type', 'token', 'url', 'dataset', 'method', 'content-type']
+    broken_callbacks = []
+
+    for c in callbacks:
+        if not c.get('url'):
+            print('Warning: one of the callbacks has no "url" set, removing it from the list')
+            broken_callbacks.append(c)
+            continue
+
+        if not c.get('method') or (c['method'].lower() not in ['get', 'post']):
+            print('Warning: one of the callbacks has incorret "method" value! Setting it to POST')
+            c['method'] = 'POST'
+
+        if not c.get('type') or (c['type'].lower() not in ['kernelci', 'custom']):
+            print('Warning: one of the callbacks has incorrect "type" value! Setting it to custom')
+            c['type'] = 'custom'
+
+        if not c.get('dataset') or (c['dataset'].lower() not in ['minimal', 'logs', 'results', 'all']):
+            print('Warning: one of the callbacks has incorrect "dataset" value! Setting it to all')
+            c['dataset'] = 'all'
+
+        if not c.get('content-type') or not c['content-type'].endswith(('json', 'urlencoded')):
+            print('Warning: one of the callbacks has incorrect "content-type" value! Setting it to json')
+            c['content-type'] = 'json'
+
+        unknown_fields = set(c.keys()) - set(expected_fields)
+        if len(unknown_fields):
+            print('Warning: one of the callbacks has unknown fields {}. Removing them'.format(unknown_fields))
+            [c.pop(k) for k in unknown_fields]
+
+    for broken in broken_callbacks:
+        callbacks.remove(broken)
+
+    return len(callbacks) != 0
+
+
 def add_callback_params(params, config, plan):
-    callback = config.get('callback')
-    if not callback:
-        return
 
-    callback_type = config.get('callback_type')
+    # The callback settings passed through command line
+    # will be the first/default callback in the callbacks list
+    # this list will later be appended if callbacks-config-file
+    # is present
+    callbacks = []
 
-    if callback_type == 'kernelci':
-        lava_cb = 'boot' if plan == 'boot' else 'test'
-        params['callback_name'] = '/'.join(['lava', lava_cb])
+    # Parse first callback if there's any
+    default_callback = config.get('callback')
+    if default_callback:
+        callback = {}
+        callback['type'] = config.get('callback_type')
+        callback['url'] = config.get('callback_url') or config.get('api')
+        callback['dataset'] = config.get('callback_dataset')
+        callback['token'] = default_callback
 
-    params.update({
-        'callback': callback,
-        'callback_url': config.get('callback_url') or config.get('api'),
-        'callback_dataset': config.get('callback_dataset'),
-        'callback_type': callback_type,
-    })
+        if callback['type'] == 'kernelci':
+            lava_cb = 'boot' if plan == 'boot' else 'test'
+            callback['name'] = '/'.join(['lava', lava_cb])
+
+        callbacks.append(callback)
+
+    # Parse callbacks config file, if there's any
+    callbacks_file = config.get('callback_config_file')
+    if callbacks_file:
+        if not os.path.exists(callbacks_file):
+            print("callbacks configuration file was not found: {}".format(os.path.abspath(callbacks_file)))
+        else:
+            with open(callbacks_file) as fd:
+                extra_callbacks = yaml.load(fd)
+                if is_callbacks_file_valid(extra_callbacks):
+                    callbacks += extra_callbacks
+
+    if len(callbacks):
+        params.update({'callbacks': callbacks})
 
 
 def get_job_params(config, test_config, defconfig, opts, build, plan):
@@ -332,6 +389,8 @@ if __name__ == '__main__':
     parser.add_argument("--callback-dataset", default='all',
                         choices=['minimal', 'logs', 'results', 'all'],
                         help="type of dataset to receive in callback")
+    parser.add_argument("--callback-config-file",
+                        help="pass a callback config file to allow extra callbacks settings")
     parser.add_argument("--defconfigs", default=0,
                         help="Expected number of defconfigs from the API")
     parser.add_argument("--defconfig_full",
