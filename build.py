@@ -35,7 +35,7 @@
 import os
 import sys
 import subprocess
-import getopt
+import argparse
 import tempfile
 import fnmatch
 import shutil
@@ -77,8 +77,6 @@ build_target = None
 build_log = None
 build_log_f = None
 
-def usage():
-    print "Usage:", sys.argv[0], "[options] [make target]"
 
 def do_post_retry(url=None, data=None, headers=None, files=None):
     retry = True
@@ -167,68 +165,88 @@ if os.environ.has_key('ARCH'):
 else:
     os.environ['ARCH'] = arch
 
-try:
-    opts, args = getopt.getopt(sys.argv[1:], "b:c:ip:sgeJ:E:j:")
+# Parse command line options
+parser = argparse.ArgumentParser()
+parser.add_argument("target", nargs="?",
+                    help="target image name")
+parser.add_argument("-b", "--boot-cmd",
+                    help="boot command")
+parser.add_argument("-c", "--defconfig",
+                    help="kernel configuration file name")
+parser.add_argument("-i", "--install", action='store_true',
+                    help="tell whether or not to install files")
+parser.add_argument("-p", "--parse-config", action='store_true',
+                    help="parse configurations from ~/.build.cfg")
+parser.add_argument("-s", "--silent-mode", action='store_true',
+                    help="silent mode")
+parser.add_argument("-g", "--git-build-info", dest="use_git", action='store_true',
+                    help="get build information from git")
+parser.add_argument("-e", "--environment-overwrite", dest="use_environment", action='store_true',
+                    help="read build variables from environment")
+parser.add_argument("-J", "--jason-save", dest='json_output_file',
+                    help="write build to local json file instead of publishing it")
+parser.add_argument("-E", "--build-environment",
+                    help="specify environment for this build")
+parser.add_argument("-j", "--jobs", dest="make_threads", type=int,
+                    help="number of parallel threads to run make")
 
-except getopt.GetoptError as err:
-    print str(err) # will print something like "option -a not recognized"
-    sys.exit(2)
-for o, a in opts:
-    if o == "-b":
-        boot_cmd = a
-        install = True
-    if o == '-c':
-        defs = a.split('+')
-        for a in defs:
-            if os.path.exists("arch/%s/configs/%s" % (arch, a)):
-                defconfig = a
-            elif a == "defconfig" or a == "tinyconfig" or re.match("all(\w*)config", a):
-                defconfig = a
-            elif os.path.exists(a):
-                # Append fragment contents to temp frag file
-                frag = open(a)
-                os.write(kconfig_tmpfile_fd, "\n# fragment from: %s\n" %a)
-                for line in frag:
-                    os.write(kconfig_tmpfile_fd, line)
-                frag.close()
-                frag_names.append(os.path.basename(os.path.splitext(a)[0]))
-            elif a.startswith("CONFIG_"):
-                # add to temp frag file
-                os.write(kconfig_tmpfile_fd, a + "\n")
-                os.fsync(kconfig_tmpfile_fd)
-                frag_names.append(a)
-            else:
-                print "ERROR: kconfig file/fragment (%s) doesn't exist" %a
-                sys.exit(1)
+args = parser.parse_args()
+if args.boot_cmd:
+    boot_cmd = args.boot_cmd
+    install = True
+if args.defconfig:
+    defs = args.defconfig.split('+')
+    for a in defs:
+        if os.path.exists("arch/%s/configs/%s" % (arch, a)):
+            defconfig = a
+        elif a == "defconfig" or a == "tinyconfig" or re.match("all(\w*)config", a):
+            defconfig = a
+        elif os.path.exists(a):
+            # Append fragment contents to temp frag file
+            frag = open(a)
+            os.write(kconfig_tmpfile_fd, "\n# fragment from: %s\n" %a)
+            for line in frag:
+                os.write(kconfig_tmpfile_fd, line)
+            frag.close()
+            frag_names.append(os.path.basename(os.path.splitext(a)[0]))
+        elif a.startswith("CONFIG_"):
+            # add to temp frag file
+            os.write(kconfig_tmpfile_fd, a + "\n")
+            os.fsync(kconfig_tmpfile_fd)
+            frag_names.append(a)
+        else:
+            print "ERROR: kconfig file/fragment (%s) doesn't exist" %a
+            sys.exit(1)
 
-    if o == '-i':
-        install = True
-    if o == '-p':
-        config = ConfigParser.ConfigParser()
-        try:
-            config.read(os.path.expanduser('~/.buildpy.cfg'))
-            api = config.get(a, 'api')
-            token = config.get(a, 'token')
-            publish = True
-        except:
-            print "ERROR: unable to load configuration file"
-    if o == '-s':
-        silent = not silent
-    if o == '-g':
-        print("Getting build info from git")
-        use_git = True
-    if o == '-e':
-        print "Reading build variables from environment"
+if args.install:
+    install = True
+if args.parse_config:
+    config = ConfigParser.ConfigParser()
+    try:
+        config.read(os.path.expanduser('~/.buildpy.cfg'))
+        api = config.get('api')
+        token = config.get('token')
         publish = True
-        use_environment = True
-    if o == '-J':
-        print("Not posting build data but saving to local JSON instead")
-        build_data_json = a
-    if o == '-j':
-        make_threads = int(a)
-        print("Parallel builds: {}".format(make_threads))
-    if o == '-E':
-        build_environment = a
+    except:
+        print "ERROR: unable to load configuration file"
+if args.silent_mode:
+    silent = not silent
+if args.use_git:
+    print("Getting build info from git")
+    use_git = True
+if args.use_environment:
+    print "Reading build variables from environment"
+    publish = True
+    use_environment = True
+if args.build_environment:
+    print "Reading build variables from environment"
+    build_environment = args.build_environment
+if args.json_output_file:
+    print("Not posting build data but saving to local JSON instead")
+    build_data_json = args.json_output_file
+if args.make_threads:
+    make_threads = int(args.make_threads)
+    print("Parallel builds: {}".format(make_threads))
 
 # Default umask for file creation
 os.umask(022)
@@ -366,8 +384,8 @@ extra_configs(dot_config, kbuild_output)
 #
 # Build kernel
 #
-if len(args) >= 1:
-    build_target = args[0]
+if args.target:
+    build_target = args.target
 elif arch == "arc":
     build_target = "uImage.gz"
 elif arch == "mips":
